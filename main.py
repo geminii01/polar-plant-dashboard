@@ -494,7 +494,7 @@ def main():
                     color='학교',
                     color_discrete_map={s: SCHOOL_INFO[s]['color'] for s in schools_list},
                     title="잎 수 vs 생중량",
-                    trendline="ols"
+                    # trendline="ols"
                 )
                 fig_corr1.update_layout(
                     height=400,
@@ -511,7 +511,7 @@ def main():
                     color='학교',
                     color_discrete_map={s: SCHOOL_INFO[s]['color'] for s in schools_list},
                     title="지상부 길이 vs 생중량",
-                    trendline="ols"
+                    # trendline="ols"
                 )
                 fig_corr2.update_layout(
                     height=400,
