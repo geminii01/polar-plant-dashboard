@@ -127,6 +127,12 @@ def main():
     schools = ["전체"] + list(SCHOOL_INFO.keys())
     selected_school = st.sidebar.selectbox("학교 선택", schools)
     
+    # 선택에 따라 필터링할 학교 목록 결정
+    if selected_school == "전체":
+        filtered_schools = list(SCHOOL_INFO.keys())
+    else:
+        filtered_schools = [selected_school]
+    
     # 탭 생성
     tab1, tab2, tab3 = st.tabs(["📖 실험 개요", "🌡️ 환경 데이터", "📊 생육 결과"])
     
@@ -163,26 +169,34 @@ def main():
             use_container_width=True
         )
         
-        # 주요 지표 카드
+        # 주요 지표 카드 (선택한 학교에 따라 변경)
         st.subheader("📊 주요 지표")
         col1, col2, col3, col4 = st.columns(4)
         
-        total_samples = sum(len(df) for df in growth_data.values())
+        # 필터링된 데이터로 계산
+        total_samples = sum(len(growth_data[s]) for s in filtered_schools if s in growth_data)
         
         if env_data:
-            avg_temp = sum(df['temperature'].mean() for df in env_data.values()) / len(env_data)
-            avg_humidity = sum(df['humidity'].mean() for df in env_data.values()) / len(env_data)
+            filtered_env = {s: env_data[s] for s in filtered_schools if s in env_data}
+            if filtered_env:
+                avg_temp = sum(df['temperature'].mean() for df in filtered_env.values()) / len(filtered_env)
+                avg_humidity = sum(df['humidity'].mean() for df in filtered_env.values()) / len(filtered_env)
+            else:
+                avg_temp = 0
+                avg_humidity = 0
         else:
             avg_temp = 0
             avg_humidity = 0
         
-        # 최적 EC 찾기 (생중량 기준)
-        optimal_ec = "2.0 (하늘고)"
+        # 최적 EC 찾기 (필터링된 학교 내에서)
+        optimal_ec = "-"
         if growth_data:
             avg_weights = {}
-            for school, df in growth_data.items():
-                if '생중량(g)' in df.columns:
-                    avg_weights[school] = df['생중량(g)'].mean()
+            for school in filtered_schools:
+                if school in growth_data:
+                    df = growth_data[school]
+                    if '생중량(g)' in df.columns:
+                        avg_weights[school] = df['생중량(g)'].mean()
             if avg_weights:
                 optimal_school = max(avg_weights, key=avg_weights.get)
                 optimal_ec = f"{SCHOOL_INFO[optimal_school]['ec']} ({optimal_school})"
@@ -200,8 +214,8 @@ def main():
             st.warning("⚠️ 환경 데이터를 불러올 수 없습니다.")
             return
         
-        # 학교별 환경 평균 비교 (2x2 서브플롯)
-        st.subheader("📈 학교별 환경 평균 비교")
+        # 학교별 환경 평균 비교 (필터링 적용)
+        st.subheader(f"📈 {'전체 ' if selected_school == '전체' else selected_school + ' '}환경 평균 비교")
         
         fig = make_subplots(
             rows=2, cols=2,
@@ -210,7 +224,8 @@ def main():
             horizontal_spacing=0.1
         )
         
-        schools_list = list(env_data.keys())
+        # 필터링된 학교만 사용
+        schools_list = [s for s in filtered_schools if s in env_data]
         colors = [SCHOOL_INFO[s]["color"] for s in schools_list]
         
         # 평균 계산
@@ -266,7 +281,7 @@ def main():
         
         st.plotly_chart(fig, use_container_width=True)
         
-        # 선택한 학교 시계열
+        # 시계열 (특정 학교 선택 시에만)
         if selected_school != "전체" and selected_school in env_data:
             st.subheader(f"📉 {selected_school} 환경 데이터 시계열")
             
@@ -329,18 +344,20 @@ def main():
         # 환경 데이터 원본
         with st.expander("📋 환경 데이터 원본"):
             if selected_school == "전체":
-                for school, df in env_data.items():
-                    st.subheader(school)
-                    st.dataframe(df, use_container_width=True)
-                    
-                    # CSV 다운로드
-                    csv = df.to_csv(index=False).encode('utf-8-sig')
-                    st.download_button(
-                        label=f"📥 {school} CSV 다운로드",
-                        data=csv,
-                        file_name=f"{school}_환경데이터.csv",
-                        mime="text/csv"
-                    )
+                for school in filtered_schools:
+                    if school in env_data:
+                        st.subheader(school)
+                        st.dataframe(env_data[school], use_container_width=True)
+                        
+                        # CSV 다운로드
+                        csv = env_data[school].to_csv(index=False).encode('utf-8-sig')
+                        st.download_button(
+                            label=f"📥 {school} CSV 다운로드",
+                            data=csv,
+                            file_name=f"{school}_환경데이터.csv",
+                            mime="text/csv",
+                            key=f"env_csv_{school}"
+                        )
             else:
                 if selected_school in env_data:
                     st.dataframe(env_data[selected_school], use_container_width=True)
@@ -360,19 +377,22 @@ def main():
             st.warning("⚠️ 생육 결과 데이터를 불러올 수 없습니다.")
             return
         
-        # 핵심 결과 카드: EC별 평균 생중량
-        st.subheader("🥇 핵심 결과: EC별 평균 생중량")
+        # 핵심 결과 카드: EC별 평균 생중량 (필터링 적용)
+        st.subheader(f"🥇 핵심 결과: {'전체 ' if selected_school == '전체' else selected_school + ' '}EC별 평균 생중량")
         
         avg_weights_by_ec = {}
-        for school, df in growth_data.items():
-            if '생중량(g)' in df.columns:
-                ec = SCHOOL_INFO[school]['ec']
-                avg_weight = df['생중량(g)'].mean()
-                avg_weights_by_ec[f"EC {ec} ({school})"] = avg_weight
+        for school in filtered_schools:
+            if school in growth_data:
+                df = growth_data[school]
+                if '생중량(g)' in df.columns:
+                    ec = SCHOOL_INFO[school]['ec']
+                    avg_weight = df['생중량(g)'].mean()
+                    avg_weights_by_ec[f"EC {ec} ({school})"] = avg_weight
         
         if avg_weights_by_ec:
-            col1, col2, col3, col4 = st.columns(4)
-            cols = [col1, col2, col3, col4]
+            # 동적 컬럼 생성
+            num_schools = len(avg_weights_by_ec)
+            cols = st.columns(num_schools)
             
             max_weight = max(avg_weights_by_ec.values())
             
@@ -385,8 +405,8 @@ def main():
                     delta_color="normal" if is_max else "off"
                 )
         
-        # EC별 생육 비교 (2x2)
-        st.subheader("📊 EC별 생육 비교")
+        # EC별 생육 비교 (필터링 적용)
+        st.subheader(f"📊 {'전체 ' if selected_school == '전체' else selected_school + ' '}생육 비교")
         
         fig2 = make_subplots(
             rows=2, cols=2,
@@ -395,7 +415,8 @@ def main():
             horizontal_spacing=0.1
         )
         
-        schools_list = list(growth_data.keys())
+        # 필터링된 학교만 사용
+        schools_list = [s for s in filtered_schools if s in growth_data]
         colors = [SCHOOL_INFO[s]["color"] for s in schools_list]
         
         # 평균 계산
@@ -449,8 +470,8 @@ def main():
         
         st.plotly_chart(fig2, use_container_width=True)
         
-        # 학교별 생중량 분포
-        st.subheader("📦 학교별 생중량 분포")
+        # 학교별 생중량 분포 (필터링 적용)
+        st.subheader(f"📦 {'전체 ' if selected_school == '전체' else selected_school + ' '}생중량 분포")
         
         fig_box = go.Figure()
         for school in schools_list:
@@ -470,67 +491,69 @@ def main():
         
         st.plotly_chart(fig_box, use_container_width=True)
         
-        # 상관관계 분석
-        st.subheader("🔗 상관관계 분석")
+        # 상관관계 분석 (필터링 적용)
+        st.subheader(f"🔗 {'전체 ' if selected_school == '전체' else selected_school + ' '}상관관계 분석")
         
         col1, col2 = st.columns(2)
         
-        # 모든 데이터 합치기
+        # 필터링된 데이터 합치기
         all_data = []
-        for school, df in growth_data.items():
-            df_copy = df.copy()
-            df_copy['학교'] = school
-            df_copy['EC'] = SCHOOL_INFO[school]['ec']
-            all_data.append(df_copy)
+        for school in filtered_schools:
+            if school in growth_data:
+                df_copy = growth_data[school].copy()
+                df_copy['학교'] = school
+                df_copy['EC'] = SCHOOL_INFO[school]['ec']
+                all_data.append(df_copy)
         
-        combined_df = pd.concat(all_data, ignore_index=True)
-        
-        with col1:
-            if '잎 수(장)' in combined_df.columns and '생중량(g)' in combined_df.columns:
-                fig_corr1 = px.scatter(
-                    combined_df,
-                    x='잎 수(장)',
-                    y='생중량(g)',
-                    color='학교',
-                    color_discrete_map={s: SCHOOL_INFO[s]['color'] for s in schools_list},
-                    title="잎 수 vs 생중량",
-                    # trendline="ols"
-                )
-                fig_corr1.update_layout(
-                    height=400,
-                    font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif")
-                )
-                st.plotly_chart(fig_corr1, use_container_width=True)
-        
-        with col2:
-            if '지상부 길이(mm)' in combined_df.columns and '생중량(g)' in combined_df.columns:
-                fig_corr2 = px.scatter(
-                    combined_df,
-                    x='지상부 길이(mm)',
-                    y='생중량(g)',
-                    color='학교',
-                    color_discrete_map={s: SCHOOL_INFO[s]['color'] for s in schools_list},
-                    title="지상부 길이 vs 생중량",
-                    # trendline="ols"
-                )
-                fig_corr2.update_layout(
-                    height=400,
-                    font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif")
-                )
-                st.plotly_chart(fig_corr2, use_container_width=True)
+        if all_data:
+            combined_df = pd.concat(all_data, ignore_index=True)
+            
+            with col1:
+                if '잎 수(장)' in combined_df.columns and '생중량(g)' in combined_df.columns:
+                    fig_corr1 = px.scatter(
+                        combined_df,
+                        x='잎 수(장)',
+                        y='생중량(g)',
+                        color='학교',
+                        color_discrete_map={s: SCHOOL_INFO[s]['color'] for s in schools_list},
+                        title="잎 수 vs 생중량"
+                    )
+                    fig_corr1.update_layout(
+                        height=400,
+                        font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif")
+                    )
+                    st.plotly_chart(fig_corr1, use_container_width=True)
+            
+            with col2:
+                if '지상부 길이(mm)' in combined_df.columns and '생중량(g)' in combined_df.columns:
+                    fig_corr2 = px.scatter(
+                        combined_df,
+                        x='지상부 길이(mm)',
+                        y='생중량(g)',
+                        color='학교',
+                        color_discrete_map={s: SCHOOL_INFO[s]['color'] for s in schools_list},
+                        title="지상부 길이 vs 생중량"
+                    )
+                    fig_corr2.update_layout(
+                        height=400,
+                        font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif")
+                    )
+                    st.plotly_chart(fig_corr2, use_container_width=True)
         
         # 생육 데이터 원본
         with st.expander("📋 생육 데이터 원본"):
             if selected_school == "전체":
-                for school, df in growth_data.items():
-                    st.subheader(school)
-                    st.dataframe(df, use_container_width=True)
+                for school in filtered_schools:
+                    if school in growth_data:
+                        st.subheader(school)
+                        st.dataframe(growth_data[school], use_container_width=True)
                 
                 # 전체 XLSX 다운로드
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    for school, df in growth_data.items():
-                        df.to_excel(writer, sheet_name=school, index=False)
+                    for school in filtered_schools:
+                        if school in growth_data:
+                            growth_data[school].to_excel(writer, sheet_name=school, index=False)
                 buffer.seek(0)
                 
                 st.download_button(
